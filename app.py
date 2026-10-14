@@ -1,5 +1,6 @@
 import streamlit as st
 import requests, re, json
+from plexi import solicitar, resultado, PlexiError
 from datetime import datetime, timezone
 
 st.set_page_config(page_title="ValidaCliente | MVP", page_icon="🧾", layout="wide")
@@ -97,6 +98,56 @@ if "empresa" in st.session_state:
     st.caption(f"Fonte cadastral: {st.session_state.get('fonte', 'não informada')}. Não é consulta de dívidas; confirme os dados na Receita Federal.")
     st.error("CNPJ ativo não comprova ausência de dívidas ou autorização para vender. Regularidade fiscal e situação financeira: NÃO CONSULTADAS automaticamente.")
     st.markdown("[Consultar certidões RFB/PGFN](https://www.gov.br/pt-br/servicos/consultar-certidoes-emitidas-pela-receita-federal-e-ou-procuradoria-geral-da-fazenda-nacional) · [Emitir certidão fiscal](https://www.gov.br/pt-br/servicos/emitir-certidao-de-regularidade-fiscal) · [Lista de devedores PGFN](https://www.gov.br/pt-br/servicos/consultar-lista-de-devedores-da-pgfn)")
+    st.divider()
+    st.subheader("Protestos em cartório — Plexi")
+    st.caption("Consulta real, somente quando configurada. Cada solicitação pode consumir créditos. Nacional contabiliza SP no total de títulos; NÃO some os totais de títulos das duas consultas.")
+    token = st.secrets.get("PLEXI_API_KEY", "")
+    certificate = st.secrets.get("PLEXI_CERTIFICATE_ID", "")
+    credential = st.secrets.get("PLEXI_CREDENTIAL_ID", "")
+    if not token:
+        st.info("Integração Plexi não configurada. Configure os segredos no Streamlit Cloud; nenhum resultado de protesto foi consultado.")
+    else:
+        for escopo, titulo in (("nacional", "CENPROT Nacional"), ("sp", "CENPROT São Paulo")):
+            st.markdown(f"**{titulo}**")
+            chave = f"plexi_{escopo}_{cnpj}"
+            if st.button(f"Solicitar consulta {titulo}", key=f"start_{chave}"):
+                try:
+                    rid = solicitar(cnpj, escopo, token, certificate=certificate or None,
+                        credential=(credential or None) if escopo == "nacional" and not certificate else None)
+                    st.session_state[chave] = rid
+                    st.success(f"Solicitação enviada. Protocolo: {rid}. Aguarde alguns instantes e clique em Verificar resultado.")
+                except PlexiError as exc:
+                    st.error(str(exc))
+            rid = st.session_state.get(chave)
+            if rid:
+                st.caption(f"requestId: {rid}")
+                if st.button(f"Verificar resultado — {titulo}", key=f"check_{chave}"):
+                    try:
+                        retorno = resultado(rid, token)
+                        st.session_state[f"ret_{chave}"] = retorno
+                    except PlexiError as exc:
+                        st.error(str(exc))
+                retorno = st.session_state.get(f"ret_{chave}")
+                if retorno:
+                    estado = retorno["estado"]
+                    if estado == "processando":
+                        st.info("Consulta ainda em processamento. Verifique novamente sem criar nova solicitação.")
+                    elif estado == "concluido":
+                        dados = retorno["dados"]
+                        situacao_protesto = str(dados.get("status", "")).lower()
+                        if situacao_protesto in ("positiva", "positivo"):
+                            st.warning("PROTESTOS ENCONTRADOS — revisão comercial obrigatória.")
+                        elif situacao_protesto in ("negativa", "negativo"):
+                            st.success("Sem protestos identificados nesta consulta e abrangência; não equivale a ausência de outras dívidas.")
+                        st.write("Status da fonte:", dados.get("status"))
+                        st.write("Quantidade informada:", dados.get("quantidadeProtestos", dados.get("qtdTitulos", "Não informada")))
+                        if escopo == "sp":
+                            st.write("Valor protestado em SP (não é saldo atualizado):", dados.get("valorProtestado", "Não informado"))
+                        st.download_button(f"Baixar retorno {titulo} (JSON sem PDF)", json.dumps({k:v for k,v in dados.items() if k != "pdf"}, ensure_ascii=False, indent=2), file_name=f"plexi_{escopo}_{cnpj}.json", key=f"download_{chave}")
+                    else:
+                        st.error("Consulta inconclusiva ou com erro; não considerar negativa.")
+                        st.json({k:v for k,v in (retorno.get("dados") or {}).items() if k != "pdf"})
+    st.divider()
     st.subheader("Conferência fiscal e financeira")
     fiscal = st.selectbox("Certidão RFB/PGFN (conferência humana)", ["Não verificado", "CND — negativa", "CPEND — positiva com efeitos de negativa", "CPD — positiva", "Emissão indisponível / inconclusiva"], key=f"fiscal_{cnpj}")
     interno = st.selectbox("Débitos ou bloqueios no ERP (conferência humana)", ["Não verificado", "Sem bloqueio confirmado", "Com débito ou bloqueio confirmado"], key=f"interno_{cnpj}")

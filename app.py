@@ -101,9 +101,12 @@ if "empresa" in st.session_state:
     st.divider()
     st.subheader("Protestos em cartório — Plexi")
     st.caption("Consulta real, somente quando configurada. Cada solicitação pode consumir créditos. Nacional contabiliza SP no total de títulos; NÃO some os totais de títulos das duas consultas.")
-    token = st.secrets.get("PLEXI_API_KEY", "")
-    certificate = st.secrets.get("PLEXI_CERTIFICATE_ID", "")
-    credential = st.secrets.get("PLEXI_CREDENTIAL_ID", "")
+    try:
+        token = st.secrets.get("PLEXI_API_KEY", "")
+        certificate = st.secrets.get("PLEXI_CERTIFICATE_ID", "")
+        credential = st.secrets.get("PLEXI_CREDENTIAL_ID", "")
+    except (FileNotFoundError, KeyError):
+        token = certificate = credential = ""
     if not token:
         st.info("Integração Plexi não configurada. Configure os segredos no Streamlit Cloud; nenhum resultado de protesto foi consultado.")
     else:

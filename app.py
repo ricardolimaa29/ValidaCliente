@@ -54,6 +54,12 @@ if "empresa" in st.session_state:
     st.write("**Endereço:**", ", ".join(str(empresa.get(k) or "") for k in ("logradouro","numero","bairro","municipio","uf") if empresa.get(k)))
     st.write("**CNAE principal:**", empresa.get("cnae_fiscal_descricao") or "Não informado")
     st.caption("Consulta por BrasilAPI; confirme a situação na fonte oficial quando necessário.")
+    st.error("CNPJ ativo não comprova ausência de dívidas ou autorização para vender. Regularidade fiscal e situação financeira: NÃO CONSULTADAS automaticamente.")
+    st.markdown("[Consultar certidões RFB/PGFN](https://www.gov.br/pt-br/servicos/consultar-certidoes-emitidas-pela-receita-federal-e-ou-procuradoria-geral-da-fazenda-nacional) · [Emitir certidão fiscal](https://www.gov.br/pt-br/servicos/emitir-certidao-de-regularidade-fiscal) · [Lista de devedores PGFN](https://www.gov.br/pt-br/servicos/consultar-lista-de-devedores-da-pgfn)")
+    st.subheader("Conferência fiscal e financeira")
+    fiscal = st.selectbox("Certidão RFB/PGFN (conferência humana)", ["Não verificado", "CND — negativa", "CPEND — positiva com efeitos de negativa", "CPD — positiva", "Emissão indisponível / inconclusiva"], key=f"fiscal_{cnpj}")
+    interno = st.selectbox("Débitos ou bloqueios no ERP (conferência humana)", ["Não verificado", "Sem bloqueio confirmado", "Com débito ou bloqueio confirmado"], key=f"interno_{cnpj}")
+    st.caption("CPEND pode coexistir com dívidas suspensas ou parceladas. A certidão não substitui a análise de crédito.")
     st.divider()
     st.subheader("Checklist regulatório")
     st.caption("CRF é Farmácia; CRM é Medicina. Confirme quais registros a empresa exige para este tipo de cliente.")
@@ -66,10 +72,10 @@ if "empresa" in st.session_state:
     if situacao.upper() != "ATIVA":
         parecer = "REVISÃO NECESSÁRIA — CNPJ não confirmado como ativo"
         st.warning(parecer)
-    elif any(s.startswith("Pendente") for s in status.values()):
+    elif fiscal == "CPD — positiva" or interno == "Com débito ou bloqueio confirmado" or any(s.startswith("Pendente") for s in status.values()):
         parecer = "NÃO LIBERAR — há pendência registrada"
         st.error(parecer)
-    elif any(s == "Não verificado" for s in status.values()):
+    elif fiscal in ("Não verificado", "Emissão indisponível / inconclusiva") or interno == "Não verificado" or any(s == "Não verificado" for s in status.values()):
         parecer = "AGUARDANDO CONFERÊNCIA — não liberar automaticamente"
         st.warning(parecer)
     else:
@@ -80,6 +86,8 @@ if "empresa" in st.session_state:
         "cnpj": cnpj,
         "empresa": empresa,
         "documentos": {nome: {"status": valor, "observacao": st.session_state.get(f"obs_{nome}_{cnpj}", ""), "portal": PORTAIS[nome]} for nome,valor in status.items()},
+        "certidao_fiscal_declarada": fiscal,
+        "situacao_erp_declarada": interno,
         "parecer_preliminar": parecer
     }
     st.download_button("Baixar relatório JSON", json.dumps(registro, ensure_ascii=False, indent=2), file_name=f"consulta_{cnpj}.json", mime="application/json")
